@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Rails Enterprise Starter Setup Script
+# Run this from within a new Rails project to add enterprise patterns
+
+set -e
+
+echo "🚀 Setting up Rails Enterprise patterns..."
+
+# Check if we're in a Rails project
+if [ ! -f "Gemfile" ] || ! grep -q "rails" Gemfile; then
+  echo "❌ Error: This doesn't appear to be a Rails project."
+  echo "   Run this from the root of your Rails application."
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATE_DIR="$SCRIPT_DIR/template"
+
+echo "📦 Adding required gems..."
+bundle add devise pundit paranoia kaminari chartkick groupdate 2>/dev/null || true
+bundle add rspec-rails factory_bot_rails shoulda-matchers --group development,test 2>/dev/null || true
+bundle add rubocop-rails-omakase brakeman --group development 2>/dev/null || true
+
+echo "📁 Copying design system files..."
+cp -n "$TEMPLATE_DIR/app/assets/stylesheets/design-tokens.css" app/assets/stylesheets/ 2>/dev/null || echo "   design-tokens.css already exists"
+
+echo "📁 Copying model concerns..."
+mkdir -p app/models/concerns
+cp -n "$TEMPLATE_DIR/app/models/concerns/auditable.rb" app/models/concerns/ 2>/dev/null || echo "   auditable.rb already exists"
+cp -n "$TEMPLATE_DIR/app/models/current.rb" app/models/ 2>/dev/null || echo "   current.rb already exists"
+
+echo "📁 Copying controller concerns..."
+mkdir -p app/controllers/concerns
+cp -n "$TEMPLATE_DIR/app/controllers/concerns/activity_tracking.rb" app/controllers/concerns/ 2>/dev/null || echo "   activity_tracking.rb already exists"
+
+echo "📁 Copying helpers..."
+cp -n "$TEMPLATE_DIR/app/helpers/application_helper.rb" app/helpers/ 2>/dev/null || echo "   application_helper.rb already exists"
+
+echo "📁 Copying CLAUDE.md template..."
+cp -n "$TEMPLATE_DIR/CLAUDE.md" . 2>/dev/null || echo "   CLAUDE.md already exists"
+
+echo ""
+echo "✅ Enterprise patterns installed!"
+echo ""
+echo "Next steps:"
+echo "  1. Run: rails generate devise:install"
+echo "  2. Run: rails generate devise User"
+echo "  3. Run: rails generate pundit:install"
+echo "  4. Run: rails generate rspec:install"
+echo "  5. Add 'include Auditable' to models you want to audit"
+echo "  6. Add 'include ActivityTracking' to ApplicationController"
+echo "  7. Update CLAUDE.md with your project details"
+echo ""
+echo "📚 Documentation: https://github.com/benmacdonald/rails-enterprise-starter"
