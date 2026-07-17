@@ -1,0 +1,9 @@
+# security.txt — RFC 9116 vulnerability disclosure contact.
+# Complete before production:
+#   1. Replace the Contact address with a monitored mailbox (must match SECURITY.md).
+#   2. Update Expires (below) — it is set to roughly one year from generation and MUST
+#      be kept current; an expired security.txt tells researchers this file is stale.
+#      The alert catalogue (docs/operations/alerts.md) includes a reminder alert.
+Contact: mailto:security@example.com
+Expires: 2027-07-16T00:00:00Z
+Preferred-Languages: en

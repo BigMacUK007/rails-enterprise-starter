@@ -1,0 +1,10 @@
+schema_version: 1
+name: webhooks
+status: interface_only
+summary: >-
+  Inbound webhook receipt (raw-payload signature verification, replay windows,
+  idempotent consumers) and outbound delivery with retries and operator replay.
+requires_approved_scope: true
+conformance:
+  contract: MODULE.md
+  required_checks: []

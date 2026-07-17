@@ -1,0 +1,67 @@
+# Marked-edit definitions applied by lib/t40_starter/edit_engine.rb.
+#
+# Each block is fenced by its first and last lines (the t40 markers).
+# Engine rules:
+#   - block present and identical            => noop
+#   - markers present but content differs    => replace between markers
+#   - markers absent                         => insert after the anchor line
+#     (or append at EOF); inserted blocks are indented to the anchor's
+#     indentation plus one level so the result passes rubocop-rails-omakase
+#   - anchor line missing                    => conflict
+edits:
+  - file: config/routes.rb
+    section: routes
+    anchor: "Rails.application.routes.draw do"   # insert AFTER this line
+    block: |
+      # >>> t40:starter routes >>>
+      resource :session, only: %i[ new create destroy ] do
+        resource :magic_link, only: %i[ show create ], module: :sessions
+      end
+      resource :account_selection, only: %i[ show update ], controller: "t40/account_selections"
+      resources :active_sessions, only: %i[ index destroy ], controller: "t40/active_sessions" do
+        delete :all, on: :collection, action: :destroy_all
+      end
+      resources :audit_events, only: %i[ index ], controller: "t40/audit_events" do
+        get :export, on: :collection
+      end
+      get "/private-attachments/:id", to: "t40/attachments#show", as: :private_attachment
+      resources :failed_jobs, only: %i[ index ], controller: "t40/failed_jobs" do
+        post :replay, on: :member
+      end
+      get "/health/live",  to: "t40/health#live"
+      get "/health/ready", to: "t40/health#ready"
+      # <<< t40:starter routes <<<
+  - file: Gemfile
+    section: gems
+    anchor: EOF          # append at end of file
+    block: |
+      # >>> t40:starter gems >>>
+      gem "csv"
+      gem "phlex-rails", "~> 2.4"
+      gem "solid_queue"
+      group :development, :test do
+        gem "rspec-rails"
+        gem "factory_bot_rails"
+      end
+      group :development do
+        gem "bundler-audit", require: false
+      end
+      # <<< t40:starter gems <<<
+  - file: app/controllers/application_controller.rb
+    section: controller
+    anchor: "class ApplicationController < ActionController::Base"
+    block: |
+      # >>> t40:starter controller >>>
+      include Authentication
+      include AccountScoping
+      include Authorization
+      include MaintenanceMode
+      # <<< t40:starter controller <<<
+  - file: app/jobs/application_job.rb
+    section: jobs
+    anchor: "class ApplicationJob < ActiveJob::Base"
+    block: |
+      # >>> t40:starter jobs >>>
+      include T40::JobContext
+      include T40::JobPolicy
+      # <<< t40:starter jobs <<<

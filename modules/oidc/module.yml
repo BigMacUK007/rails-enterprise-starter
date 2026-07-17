@@ -1,0 +1,10 @@
+schema_version: 1
+name: oidc
+status: interface_only
+summary: >-
+  Enterprise single sign-on via OpenID Connect. Federated identities keyed by
+  issuer and subject, never by email. First-choice SSO module.
+requires_approved_scope: true
+conformance:
+  contract: MODULE.md
+  required_checks: []

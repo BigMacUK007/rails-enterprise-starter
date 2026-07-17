@@ -1,0 +1,53 @@
+# Required environment configuration for this application.
+#
+# REFERENCES ONLY — this file must NEVER contain a secret value. Secrets live
+# in Rails credentials or your secret manager and are injected as environment
+# variables at deploy time. The installer and this starter never write
+# secrets.
+#
+# Consumed by:
+#   - humans preparing a new environment;
+#   - config/initializers/t40_boot_validation.rb, which refuses to boot an
+#     insecurely configured production process.
+production:
+  required:
+    - name: SECRET_KEY_BASE
+      source: rails_credentials
+      notes: "Provided via config/credentials.yml.enc + RAILS_MASTER_KEY, or set directly from a secret manager."
+    - name: DATABASE_URL
+      source: secret_manager
+      notes: "PostgreSQL connection string for the primary database."
+    - name: SMTP_ADDRESS
+      source: environment
+      notes: "SMTP host for outbound mail. Passwordless sign-in depends on mail delivery."
+    - name: SMTP_PORT
+      source: environment
+      notes: "Usually 587 (STARTTLS)."
+    - name: SMTP_USERNAME
+      source: secret_manager
+      notes: "SMTP credential reference."
+    - name: SMTP_PASSWORD
+      source: secret_manager
+      notes: "SMTP credential reference."
+  optional:
+    - name: RELEASE_SHA
+      source: ci
+      notes: "Release identifier stamped into logs and audit events. KAMAL_VERSION is used as a fallback."
+    - name: ERROR_REPORTING_DSN
+      source: secret_manager
+      notes: "DSN for the chosen error-reporting backend. The backend choice is a deferred control — see config/t40/control-manifest.yml."
+    - name: T40_CSP_ENFORCE
+      source: environment
+      notes: "Set to 1 to switch the Content Security Policy from report-only to enforcing."
+    - name: T40_MAINTENANCE
+      source: environment
+      notes: "Set to 1 (or create tmp/maintenance.txt) to serve the maintenance page with 503."
+    - name: T40_READ_ONLY
+      source: environment
+      notes: "Set to 1 to reject non-GET/HEAD requests during incident containment."
+development:
+  required: []
+  notes: "Uses config/database.yml defaults; no secrets required."
+test:
+  required: []
+  notes: "Uses config/database.yml defaults; no secrets required."

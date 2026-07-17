@@ -1,0 +1,16 @@
+# Dependabot configuration for the generated application.
+#
+# Keeps the lockfile current and GitHub Actions pinned versions up to date.
+# Weekly cadence balances patch freshness against review noise; security
+# advisories still open pull requests immediately regardless of schedule.
+version: 2
+updates:
+  - package-ecosystem: bundler
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

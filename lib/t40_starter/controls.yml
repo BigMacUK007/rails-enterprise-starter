@@ -1,0 +1,339 @@
+# T40 Enterprise Application Starter — control catalogue.
+#
+# Consumed by lib/t40_starter/control_manifest.rb, which merges this
+# catalogue with the install manifest's module selections and writes
+# config/t40/control-manifest.yml into the generated application.
+#
+# install_status:
+#   enabled     — installed and active in the core baseline
+#   deferred    — needs a project decision; owner_default is assigned
+#   conditional — active only when `module` is selected in the manifest
+#
+# reference paths are relative to the generated application root, except
+# modules/... which live in the starter repository.
+#
+# This catalogue supports evidence gathering; it does not by itself provide
+# ISO 27001, SOC 2, Cyber Essentials, WCAG conformance or legal compliance.
+controls:
+  # --- authentication -------------------------------------------------------
+  - id: AUTH-01
+    name: "Sign-in codes are short-lived, single-use and generated from a cryptographically secure source"
+    category: authentication
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/decisions/0002-passwordless-authentication.md
+  - id: AUTH-02
+    name: "Authentication responses resist account enumeration and timing disclosure"
+    category: authentication
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/decisions/0002-passwordless-authentication.md
+  - id: AUTH-03
+    name: "Rate limits cover sign-in request and code verification paths"
+    category: authentication
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/decisions/0002-passwordless-authentication.md
+
+  # --- session ----------------------------------------------------------------
+  - id: SES-01
+    name: "Sessions are rotated on authentication, individually revocable and globally revocable per identity"
+    category: session
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/decisions/0002-passwordless-authentication.md
+  - id: SES-02
+    name: "Sessions enforce explicit inactivity and absolute lifetimes"
+    category: session
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/decisions/0002-passwordless-authentication.md
+  - id: SES-03
+    name: "Session cookies are Secure, HttpOnly and SameSite, with HTTPS enforced in production"
+    category: session
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/trust-boundaries.md
+  - id: SES-04
+    name: "Step-up authentication for sensitive and administrative actions"
+    category: session
+    install_status: deferred
+    owner_default: project team
+    production_gate: true
+    reference: docs/assurance/asvs-l2-assessment.md
+
+  # --- tenancy ---------------------------------------------------------------
+  - id: TEN-01
+    name: "Tenant-owned tables carry non-null account foreign keys with account-scoped indexes"
+    category: tenancy
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/trust-boundaries.md
+  - id: TEN-02
+    name: "Account context resolves only from authenticated membership, never from request input"
+    category: tenancy
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/trust-boundaries.md
+  - id: TEN-03
+    name: "Cross-account support access is time-limited, reasoned and audited"
+    category: tenancy
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/operations/support-access.md
+  - id: TEN-04
+    name: "Durable account entitlements are separate from temporary feature flags"
+    category: tenancy
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/assurance-matrix.md
+
+  # --- authorisation -----------------------------------------------------------
+  - id: AUTHZ-01
+    name: "Server-side default-deny authorisation with explicit capability predicates"
+    category: authorisation
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/role-capability-matrix.md
+  - id: AUTHZ-02
+    name: "Negative authorisation tests cover function, record and tenant boundaries"
+    category: authorisation
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/assurance-matrix.md
+
+  # --- audit -------------------------------------------------------------------
+  - id: AUD-01
+    name: "Audit events are append-only for application users"
+    category: audit
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/assurance-matrix.md
+  - id: AUD-02
+    name: "Audit change summaries are redacted and size-limited"
+    category: audit
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/privacy/data-inventory.md
+  - id: AUD-03
+    name: "Critical actions write audit evidence inside the business transaction"
+    category: audit
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/assurance-matrix.md
+  - id: AUD-04
+    name: "Audit access and export are themselves audited"
+    category: audit
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/assurance-matrix.md
+
+  # --- privacy -----------------------------------------------------------------
+  - id: PRIV-01
+    name: "Sensitive parameters are filtered from logs and error reports"
+    category: privacy
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/privacy/data-inventory.md
+  - id: PRIV-02
+    name: "Data protection impact assessment screening completed before production"
+    category: privacy
+    install_status: deferred
+    owner_default: project team
+    production_gate: true
+    reference: docs/privacy/dpia-screening.md
+  - id: PRIV-03
+    name: "Data inventory and classification completed for project data"
+    category: privacy
+    install_status: deferred
+    owner_default: project team
+    reference: docs/privacy/data-inventory.md
+  - id: PRIV-04
+    name: "Retention schedule agreed and implemented"
+    category: privacy
+    install_status: deferred
+    owner_default: project team
+    reference: docs/privacy/retention.md
+  - id: PRIV-05
+    name: "Subject rights export and erasure flows completed for project data models"
+    category: privacy
+    install_status: deferred
+    owner_default: project team
+    reference: docs/privacy/subject-rights.md
+  - id: PRIV-06
+    name: "Special-category data safeguards and access rules approved before production"
+    category: privacy
+    install_status: deferred
+    owner_default: privacy lead
+    production_gate: true
+    applies_when:
+      data_risk: special_category_data
+    reference: docs/privacy/data-inventory.md
+  - id: PRIV-07
+    name: "Children's data age, safeguarding and consent decisions approved before production"
+    category: privacy
+    install_status: deferred
+    owner_default: privacy lead
+    production_gate: true
+    applies_when:
+      data_risk: children_data
+    reference: docs/privacy/dpia-screening.md
+  - id: PRIV-08
+    name: "Financial-data handling, access and retention controls approved before production"
+    category: privacy
+    install_status: deferred
+    owner_default: security lead
+    production_gate: true
+    applies_when:
+      data_risk: financial_data
+    reference: docs/privacy/retention.md
+
+  # --- uploads -----------------------------------------------------------------
+  - id: UPL-01
+    name: "Uploads are stored privately with declared and detected type validation and size limits"
+    category: uploads
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/threat-model.md
+
+  # --- headers -----------------------------------------------------------------
+  - id: HDR-01
+    name: "Content Security Policy installed with a report-only rollout path"
+    category: headers
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/trust-boundaries.md
+  - id: HDR-02
+    name: "HSTS, frame denial, content-type protection, referrer and permissions policies set"
+    category: headers
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/trust-boundaries.md
+
+  # --- jobs --------------------------------------------------------------------
+  - id: JOB-01
+    name: "Background jobs carry tenant, actor and correlation context and fail closed without it"
+    category: jobs
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/architecture/data-flows.md
+  - id: JOB-02
+    name: "Failed and blocked jobs are visible to operators"
+    category: jobs
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/operations/alerts.md
+
+  # --- observability -------------------------------------------------------------
+  - id: OBS-01
+    name: "Structured production logs carry correlation, tenant and release context without sensitive values"
+    category: observability
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/operations/alerts.md
+  - id: OBS-02
+    name: "Liveness and dependency-aware readiness endpoints"
+    category: observability
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/operations/alerts.md
+  - id: OBS-03
+    name: "Central error reporting configured behind a replaceable adapter"
+    category: observability
+    install_status: deferred
+    owner_default: project team
+    reference: docs/operations/alerts.md
+  - id: OBS-04
+    name: "Maintenance and read-only modes available for incident containment"
+    category: observability
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/operations/maintenance-mode.md
+
+  # --- backup --------------------------------------------------------------------
+  - id: BCK-01
+    name: "Automated encrypted backups with a passed restore test before production"
+    category: backup
+    install_status: deferred
+    owner_default: project team
+    production_gate: true
+    reference: docs/operations/backup-restore.md
+
+  # --- delivery ------------------------------------------------------------------
+  - id: DEL-01
+    name: "Secrets referenced by environment only; the installer and repository never store secret values"
+    category: delivery
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: config/t40/required-environment.yml
+  - id: DEL-02
+    name: "Feature flags have safe defaults, owners and removal dates"
+    category: delivery
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: config/t40/feature-flags.yml
+  - id: DEL-03
+    name: "CI runs tests, linting, static security analysis, dependency and secret scanning on every pull request"
+    category: delivery
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/release-evidence.md
+  - id: DEL-04
+    name: "Default branch protected; review and passing checks required before release"
+    category: delivery
+    install_status: deferred
+    owner_default: project team
+    production_gate: true
+    reference: docs/assurance/release-evidence.md
+  - id: DEL-05
+    name: "Software bill of materials generated from the release artefact and retained with release evidence"
+    category: delivery
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/release-evidence.md
+  - id: DEL-06
+    name: "Risk-tailored OWASP ASVS Level 2 assessment completed before each production release"
+    category: delivery
+    install_status: deferred
+    owner_default: project team
+    production_gate: true
+    reference: docs/assurance/asvs-l2-assessment.md
+  - id: DEL-07
+    name: "High-assurance releases use signed artefacts and retained provenance"
+    category: delivery
+    install_status: deferred
+    owner_default: release owner
+    production_gate: true
+    applies_when:
+      deployment_profile: high_assurance
+    reference: docs/assurance/release-evidence.md
+
+  # --- incident ------------------------------------------------------------------
+  - id: INC-01
+    name: "Vulnerability disclosure route published via SECURITY.md and .well-known/security.txt"
+    category: incident
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: SECURITY.md
+  - id: INC-02
+    name: "Incident response runbook with roles, severity, containment hooks and breach decision points"
+    category: incident
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/operations/incident-response.md
+
+  # --- accessibility ----------------------------------------------------------------
+  - id: ACC-01
+    name: "WCAG 2.2 AA target with automated checks and a manual test checklist"
+    category: accessibility
+    install_status: enabled
+    evidence_checks: [rspec]
+    reference: docs/assurance/accessibility-checklist.md
+
+  # --- ai (module-conditional) --------------------------------------------------------
+  - id: AI-01
+    name: "AI calls route through an internal gateway with deterministic policy authorisation, allowlisted tools and a kill switch"
+    category: ai
+    install_status: conditional
+    module: ai
+    reference: modules/ai/MODULE.md

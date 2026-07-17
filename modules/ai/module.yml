@@ -1,0 +1,11 @@
+schema_version: 1
+name: ai
+status: interface_only
+summary: >-
+  AI capability behind one internal gateway: deterministic policy authorises,
+  allowlisted typed tools, bound approvals, hard limits and a kill switch. No AI
+  dependency is installed unless this module is selected.
+requires_approved_scope: true
+conformance:
+  contract: MODULE.md
+  required_checks: []

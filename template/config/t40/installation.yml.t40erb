@@ -1,0 +1,9 @@
+project:
+  name: <%= manifest.dig("project", "name").to_json %>
+  identifier: <%= manifest.dig("project", "identifier").to_json %>
+tenancy_mode: <%= manifest.dig("tenancy", "mode") %>
+deployment_profile: <%= manifest.dig("deployment", "profile") %>
+data_risk:
+<% manifest.fetch("data_risk").each do |key, value| -%>
+  <%= key %>: <%= value %>
+<% end -%>

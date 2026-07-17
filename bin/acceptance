@@ -1,0 +1,598 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# T40 Enterprise Application Starter — acceptance harness.
+#
+# Proves the starter end-to-end at its authoritative seam: a fresh Rails
+# application after `bin/setup-enterprise` has completed. Steps:
+#
+#   1.  Fresh `rails new` app (PostgreSQL) in tmp/acceptance/
+#   2.  Installer preflight passes against the fresh app
+#   3.  Installer plan applies nothing (file snapshot before/after)
+#   4.  Installer apply succeeds
+#   5.  Re-apply is idempotent (plan all noop/skip, no file changes)
+#   6.  Databases prepare from zero
+#   7.  Concurrent attempts can consume a magic link at most once
+#   8.  App eager-loads, boots, and answers /health/live, /health/ready, /up
+#   9.  Browser authentication, tenant/audit/operator and background-job contracts pass
+#   10. Complete generated RSpec suite passes
+#   11. Resolved SPDX SBOM and release evidence are generated and validated
+#   12. RuboCop, Brakeman and bundler-audit pass
+#   13. config/t40/control-manifest.yml is present and internally valid
+#   14. Machine-readable evidence written to tmp/acceptance/evidence.json
+#
+# Flags:
+#   --keep        keep the generated app after a successful run
+#   --skip-fresh  reuse the last generated app instead of running `rails new`
+#   --fast        skip RuboCop and Brakeman
+#
+# Requires: rails (~> 8.1) on PATH and a local PostgreSQL instance. Uses
+# databases named t40_acceptance_app_* and drops them before preparing.
+# Exits non-zero on any failure. The app dir is kept for inspection on failure.
+
+require "digest"
+require "fileutils"
+require "find"
+require "json"
+require "net/http"
+require "open3"
+require "optparse"
+require "rbconfig"
+require "thread"
+require "time"
+require "uri"
+require "yaml"
+
+module T40Acceptance
+  class StepFailure < StandardError; end
+
+  class Runner
+    REPO_ROOT = File.expand_path("..", __dir__)
+    WORK_DIR = File.join(REPO_ROOT, "tmp", "acceptance")
+    APP_NAME = "t40_acceptance_app"
+    APP_DIR = File.join(WORK_DIR, APP_NAME)
+    EVIDENCE_PATH = File.join(WORK_DIR, "evidence.json")
+    MANIFEST_PATH = File.join(REPO_ROOT, "manifests", "core.yml")
+    SETUP_CLI = File.join(REPO_ROOT, "bin", "setup-enterprise")
+    VERSION_PATH = File.join(REPO_ROOT, "VERSION")
+    SERVER_PORT = 3117
+    SERVER_LOG = File.join(WORK_DIR, "server.log")
+
+    VALID_CONTROL_STATUSES = %w[enabled verified deferred not_applicable].freeze
+    MUTATING_PLAN_STATUSES = %w[create edit conflict].freeze
+    SNAPSHOT_EXCLUDES = %w[tmp log storage node_modules .git].freeze
+
+    # Bundler/Ruby context from the caller must not leak into the generated
+    # app's subprocesses (nil unsets the variable for the child).
+    CLEAN_ENV = {
+      "BUNDLE_GEMFILE" => nil,
+      "BUNDLE_PATH" => nil,
+      "BUNDLE_APP_CONFIG" => nil,
+      "BUNDLE_BIN" => nil,
+      "RUBYOPT" => nil,
+      "RAILS_ENV" => nil
+    }.freeze
+
+    def initialize(options)
+      @options = options
+      @steps = []
+      @step_index = 0
+      @started_at = Time.now.utc
+      @server_pid = nil
+    end
+
+    def run
+      $stdout.sync = true
+      preconditions!
+      step("fresh_app") { create_fresh_app }
+      step("preflight") { run_preflight }
+      step("plan_applies_nothing") { assert_plan_applies_nothing }
+      step("apply") { run_apply }
+      step("idempotent_reapply") { assert_idempotent_reapply }
+      step("db_prepare") { prepare_databases }
+      step("atomic_magic_link") { prove_atomic_magic_link_consumption }
+      step("boot_and_health") { boot_and_check_health }
+      step("browser_authentication") { run_contract_specs("spec/system/passwordless_sign_in_spec.rb") }
+      step("tenant_audit_and_operations") do
+        run_contract_specs("spec/requests/tenant_isolation_spec.rb", "spec/requests/audit_events_spec.rb",
+          "spec/requests/failed_jobs_spec.rb", "spec/requests/health_spec.rb", "spec/requests/security_headers_spec.rb")
+      end
+      step("background_work") { run_contract_specs("spec/jobs/job_context_spec.rb", "spec/jobs/operable_jobs_spec.rb") }
+      step("rspec") { run_rspec }
+      step("release_evidence") { generate_and_validate_release_evidence }
+      step("static_checks") { run_static_checks }
+      step("control_manifest") { assert_control_manifest }
+      step("evidence") { true }
+      write_evidence(result: "pass")
+      cleanup_after_success
+      summary
+      log "ACCEPTANCE PASSED"
+      0
+    rescue StepFailure => e
+      write_evidence(result: "fail")
+      summary
+      warn ""
+      warn "ACCEPTANCE FAILED: #{e.message}"
+      warn "Generated app kept for inspection: #{APP_DIR}" if Dir.exist?(APP_DIR)
+      warn "Evidence: #{EVIDENCE_PATH}"
+      1
+    rescue Interrupt
+      write_evidence(result: "fail")
+      warn "Interrupted."
+      130
+    ensure
+      stop_server
+    end
+
+    def stop_server
+      pid = @server_pid
+      return unless pid
+
+      @server_pid = nil
+      log "stopping rails server (pid #{pid})"
+      signal_server(pid, "TERM")
+      deadline = monotonic_now + 10
+      until Process.waitpid(pid, Process::WNOHANG)
+        if monotonic_now > deadline
+          signal_server(pid, "KILL")
+          Process.waitpid(pid)
+          break
+        end
+        sleep 0.2
+      end
+    rescue Errno::ECHILD, Errno::ESRCH
+      nil
+    end
+
+    private
+      # --- step machinery -------------------------------------------------
+
+      def step(name)
+        @step_index += 1
+        if skip_step?(name)
+          log_heading("#{@step_index}. #{name} (skipped)")
+          @steps << { "name" => name, "status" => "skipped", "duration" => 0.0 }
+          return
+        end
+        log_heading("#{@step_index}. #{name}")
+        started = monotonic_now
+        yield
+        @steps << { "name" => name, "status" => "pass", "duration" => (monotonic_now - started).round(2) }
+      rescue StepFailure => e
+        @steps << { "name" => name, "status" => "fail", "duration" => (monotonic_now - started).round(2) }
+        raise e
+      rescue StandardError => e
+        @steps << { "name" => name, "status" => "fail", "duration" => (monotonic_now - started).round(2) }
+        raise StepFailure, "#{name}: #{e.class}: #{e.message}"
+      end
+
+      def skip_step?(name)
+        name == "fresh_app" && @options[:skip_fresh] && Dir.exist?(APP_DIR)
+      end
+
+      def preconditions!
+        log_heading("T40 acceptance harness — starter #{starter_version}")
+        missing = [ SETUP_CLI, MANIFEST_PATH ].reject { |path| File.exist?(path) }
+        return if missing.empty?
+
+        raise StepFailure, "missing required starter files: #{missing.join(', ')}"
+      end
+
+      # --- steps ----------------------------------------------------------
+
+      def create_fresh_app
+        FileUtils.mkdir_p(WORK_DIR)
+        FileUtils.rm_rf(APP_DIR)
+        run!("rails", "-v", chdir: WORK_DIR)
+        # --skip-ci: the starter installs its own .github workflows; the Rails
+        # defaults would otherwise conflict at apply. --skip-git: the scratch
+        # app needs no repository.
+        run!("rails", "new", APP_NAME, "-d", "postgresql", "--skip-git", "--skip-ci", chdir: WORK_DIR)
+        marker = File.join(APP_DIR, "config", "application.rb")
+        raise StepFailure, "rails new returned successfully but did not create #{marker}" unless File.file?(marker)
+      end
+
+      def run_preflight
+        setup_enterprise("preflight")
+      end
+
+      def assert_plan_applies_nothing
+        before = snapshot
+        setup_enterprise("plan")
+        diff = diff_snapshots(before, snapshot)
+        return if diff.empty?
+
+        raise StepFailure, "plan modified the target app:\n#{diff.join("\n")}"
+      end
+
+      def run_apply
+        setup_enterprise("apply", "--yes")
+      end
+
+      def assert_idempotent_reapply
+        plan_output, = setup_enterprise("plan")
+        offending = mutating_plan_statuses(plan_output)
+        unless offending.empty?
+          raise StepFailure, "second plan is not clean — found statuses #{offending.uniq.inspect}; expected only noop/skip"
+        end
+
+        before = snapshot
+        setup_enterprise("apply", "--yes")
+        diff = diff_snapshots(before, snapshot)
+        return if diff.empty?
+
+        raise StepFailure, "re-apply was not idempotent — files changed:\n#{diff.join("\n")}"
+      end
+
+      def prepare_databases
+        # Clean slate: earlier runs may have left t40_acceptance_app_* behind.
+        run!("bin/rails", "db:drop", chdir: APP_DIR, allow_failure: true)
+        run!("bin/rails", "db:prepare", chdir: APP_DIR)
+      end
+
+      def prove_atomic_magic_link_consumption
+        check = <<~'RUBY'
+          identity = Identity.create!(email_address: "atomic-magic-link@example.test")
+          magic_link = identity.magic_links.create!
+          ready = Queue.new
+          start = Queue.new
+          results = Queue.new
+          errors = Queue.new
+
+          threads = 2.times.map do
+            Thread.new do
+              ActiveRecord::Base.connection_pool.with_connection do
+                ready << true
+                start.pop
+                results << MagicLink.consume(magic_link.code, identity: identity, purpose: :sign_in).present?
+              rescue StandardError => error
+                errors << error
+              end
+            end
+          end
+
+          2.times { ready.pop }
+          2.times { start << true }
+          threads.each(&:join)
+          raise errors.pop unless errors.empty?
+
+          outcomes = 2.times.map { results.pop }
+          abort "expected one successful atomic consumption, got #{outcomes.inspect}" unless outcomes.count(true) == 1
+          abort "magic link still exists after consumption" if MagicLink.exists?(magic_link.id)
+        RUBY
+        run!("bin/rails", "runner", check, chdir: APP_DIR)
+      end
+
+      def boot_and_check_health
+        run!("bin/rails", "runner", "Rails.application.eager_load!", chdir: APP_DIR)
+        start_server
+        wait_for_server
+        check_endpoint("/health/live")
+        check_endpoint("/health/ready")
+        check_endpoint("/up")
+      ensure
+        stop_server
+      end
+
+      def run_rspec
+        run!("bin/rails", "db:test:prepare", chdir: APP_DIR)
+        run!("bundle", "exec", "rspec", chdir: APP_DIR)
+      end
+
+      def run_contract_specs(*paths)
+        run!("bundle", "exec", "rspec", *paths, chdir: APP_DIR)
+      end
+
+      def generate_and_validate_release_evidence
+        run!("bin/rails", "t40:release_evidence", chdir: APP_DIR,
+          env: { "T40_RELEASE_ID" => "acceptance-#{starter_version}",
+                 "T40_RELEASE_APPROVALS" => "acceptance-harness" })
+        evidence_path = File.join(APP_DIR, "tmp", "release-evidence", "release-evidence.json")
+        sbom_path = File.join(APP_DIR, "tmp", "release-evidence", "sbom.spdx.json")
+        raise StepFailure, "release evidence missing" unless File.file?(evidence_path)
+        raise StepFailure, "SPDX SBOM missing" unless File.file?(sbom_path)
+
+        evidence = JSON.parse(File.read(evidence_path))
+        sbom = JSON.parse(File.read(sbom_path))
+        expected_digest = Digest::SHA256.file(sbom_path).hexdigest
+        raise StepFailure, "release evidence has the wrong SBOM digest" unless evidence["sbom_sha256"] == expected_digest
+        raise StepFailure, "release evidence has no source revision" if evidence["source_revision"].to_s.empty?
+        raise StepFailure, "release evidence has no required checks" if Array(evidence["required_checks"]).empty?
+        raise StepFailure, "SBOM is not SPDX 2.3" unless sbom["spdxVersion"] == "SPDX-2.3"
+        raise StepFailure, "SBOM contains no resolved packages" unless Array(sbom["packages"]).any?
+      end
+
+      def run_static_checks
+        if @options[:fast]
+          log "fast mode: skipping RuboCop and Brakeman"
+        else
+          run!("bundle", "exec", "rubocop", "--no-color", chdir: APP_DIR)
+          run!("bundle", "exec", "brakeman", "-q", "--no-pager", "--exit-on-warn", chdir: APP_DIR)
+        end
+        _, status = run!("bundle", "exec", "bundler-audit", "check", "--update", chdir: APP_DIR, allow_failure: true)
+        return if status.success?
+
+        # --update needs the network; retry offline so a flaky connection does
+        # not mask (or fake) a vulnerability finding.
+        log "bundler-audit with --update failed; retrying against the local advisory database"
+        run!("bundle", "exec", "bundler-audit", "check", chdir: APP_DIR)
+      end
+
+      def assert_control_manifest
+        path = File.join(APP_DIR, "config", "t40", "control-manifest.yml")
+        raise StepFailure, "control manifest missing: #{path}" unless File.exist?(path)
+
+        data = YAML.safe_load(File.read(path), permitted_classes: [ Date, Time ])
+        raise StepFailure, "control manifest is not a mapping" unless data.is_a?(Hash)
+
+        %w[starter_version manifest_sha256 installed_at].each do |key|
+          raise StepFailure, "control manifest missing #{key}" if data[key].to_s.strip.empty?
+        end
+
+        controls = data["controls"]
+        raise StepFailure, "control manifest has no controls" unless controls.is_a?(Array) && controls.any?
+
+        problems = []
+        controls.each do |control|
+          id = control["id"] || "(missing id)"
+          unless VALID_CONTROL_STATUSES.include?(control["status"])
+            problems << "#{id}: invalid status #{control['status'].inspect}"
+          end
+          if control["status"] == "deferred" && control["owner"].to_s.strip.empty?
+            problems << "#{id}: deferred without an owner"
+          end
+        end
+        raise StepFailure, "control manifest invalid:\n#{problems.join("\n")}" unless problems.empty?
+
+        log "control manifest OK: #{controls.size} controls, statuses valid, deferred controls owned"
+      end
+
+      # --- installer invocation --------------------------------------------
+
+      def setup_enterprise(stage, *extra)
+        run!(RbConfig.ruby, SETUP_CLI, stage,
+          "--target", APP_DIR, "--manifest", MANIFEST_PATH, "--json", *extra,
+          chdir: REPO_ROOT)
+      end
+
+      def mutating_plan_statuses(output)
+        json = extract_json(output)
+        if json.nil?
+          log "warning: could not parse plan output as JSON; relying on file snapshot only"
+          return []
+        end
+        statuses = []
+        collect_statuses(json, statuses)
+        statuses & MUTATING_PLAN_STATUSES
+      end
+
+      def collect_statuses(node, acc)
+        case node
+        when Hash
+          node.each do |key, value|
+            acc << value if key.to_s == "status" && value.is_a?(String)
+            collect_statuses(value, acc)
+          end
+        when Array
+          node.each { |item| collect_statuses(item, acc) }
+        end
+      end
+
+      def extract_json(output)
+        JSON.parse(output)
+      rescue JSON::ParserError
+        start = output.index("{")
+        finish = output.rindex("}")
+        return nil unless start && finish && finish > start
+
+        begin
+          JSON.parse(output[start..finish])
+        rescue JSON::ParserError
+          nil
+        end
+      end
+
+      # --- command execution -----------------------------------------------
+
+      def run!(*cmd, chdir:, env: {}, allow_failure: false)
+        log "$ #{cmd.join(' ')}  (in #{relative_to_repo(chdir)})"
+        output = +""
+        status = nil
+        Open3.popen2e(CLEAN_ENV.merge(env), *cmd, chdir: chdir) do |stdin, out, wait|
+          stdin.close
+          out.each_line do |line|
+            $stdout.write(line)
+            output << line
+          end
+          status = wait.value
+        end
+        if !status.success? && !allow_failure
+          raise StepFailure,
+            "command failed (exit #{status.exitstatus}): #{cmd.join(' ')}\n--- output tail ---\n#{tail(output)}"
+        end
+        [ output, status ]
+      end
+
+      # --- server ----------------------------------------------------------
+
+      def start_server
+        log "$ bin/rails server -p #{SERVER_PORT}  (background, log: #{relative_to_repo(SERVER_LOG)})"
+        @server_pid = Process.spawn(
+          CLEAN_ENV,
+          "bin/rails", "server", "-p", SERVER_PORT.to_s,
+          chdir: APP_DIR,
+          pgroup: true,
+          in: :close,
+          out: [ SERVER_LOG, "w" ],
+          err: [ :child, :out ]
+        )
+      end
+
+      def wait_for_server(timeout: 90)
+        deadline = monotonic_now + timeout
+        loop do
+          begin
+            http_get("/up")
+            return
+          rescue SystemCallError, SocketError, EOFError, Net::OpenTimeout, Net::ReadTimeout, IOError
+            # not accepting connections yet
+          end
+          if @server_pid && Process.waitpid(@server_pid, Process::WNOHANG)
+            @server_pid = nil
+            raise StepFailure, "rails server exited during boot\n--- server log tail ---\n#{server_log_tail}"
+          end
+          if monotonic_now > deadline
+            raise StepFailure,
+              "rails server did not answer on port #{SERVER_PORT} within #{timeout}s\n--- server log tail ---\n#{server_log_tail}"
+          end
+          sleep 1
+        end
+      end
+
+      def check_endpoint(path, expected: 200)
+        response = http_get(path)
+        body_preview = response.body.to_s.byteslice(0, 200)
+        log "GET #{path} -> #{response.code} #{body_preview}"
+        return if response.code.to_i == expected
+
+        raise StepFailure,
+          "GET #{path} returned #{response.code}, expected #{expected}\nbody: #{response.body.to_s.byteslice(0, 500)}\n" \
+          "--- server log tail ---\n#{server_log_tail}"
+      end
+
+      def http_get(path)
+        Net::HTTP.start("127.0.0.1", SERVER_PORT, open_timeout: 5, read_timeout: 15) do |http|
+          http.get(path)
+        end
+      end
+
+      def signal_server(pid, signal)
+        Process.kill(signal, -pid) # pgroup: true makes pid the process-group id
+      rescue Errno::ESRCH, Errno::EPERM
+        begin
+          Process.kill(signal, pid)
+        rescue Errno::ESRCH
+          nil
+        end
+      end
+
+      def server_log_tail
+        File.exist?(SERVER_LOG) ? tail(File.read(SERVER_LOG)) : "(no server log)"
+      end
+
+      # --- snapshots ---------------------------------------------------------
+
+      def snapshot
+        result = {}
+        return result unless Dir.exist?(APP_DIR)
+
+        Find.find(APP_DIR) do |path|
+          next if path == APP_DIR
+
+          relative = path.delete_prefix(APP_DIR + File::SEPARATOR)
+          if File.directory?(path)
+            Find.prune if SNAPSHOT_EXCLUDES.include?(relative)
+            next
+          end
+          next unless File.file?(path)
+
+          result[relative] = Digest::SHA256.file(path).hexdigest
+        end
+        result
+      end
+
+      def diff_snapshots(before, after)
+        diff = []
+        (after.keys - before.keys).sort.each { |path| diff << "added:   #{path}" }
+        (before.keys - after.keys).sort.each { |path| diff << "removed: #{path}" }
+        (before.keys & after.keys).sort.each do |path|
+          diff << "changed: #{path}" if before[path] != after[path]
+        end
+        diff
+      end
+
+      # --- evidence ----------------------------------------------------------
+
+      def write_evidence(result:)
+        FileUtils.mkdir_p(WORK_DIR)
+        evidence = {
+          "steps" => @steps,
+          "started_at" => @started_at.iso8601,
+          "finished_at" => Time.now.utc.iso8601,
+          "starter_version" => starter_version,
+          "result" => result,
+          "contracts" => @steps.to_h { |entry| [ entry["name"], entry["status"] ] }
+        }
+        File.write(EVIDENCE_PATH, JSON.pretty_generate(evidence) + "\n")
+        log "evidence written: #{relative_to_repo(EVIDENCE_PATH)}"
+      end
+
+      def cleanup_after_success
+        if @options[:keep] || @options[:skip_fresh]
+          log "keeping generated app: #{APP_DIR}"
+        else
+          FileUtils.rm_rf(APP_DIR)
+          log "removed generated app (pass --keep to retain it)"
+        end
+      end
+
+      def summary
+        log ""
+        log "step summary:"
+        @steps.each do |entry|
+          log format("  %-22s %-8s %8.2fs", entry["name"], entry["status"], entry["duration"])
+        end
+      end
+
+      # --- helpers -------------------------------------------------------------
+
+      def starter_version
+        @starter_version ||= File.exist?(VERSION_PATH) ? File.read(VERSION_PATH).strip : "unknown"
+      end
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      end
+
+      def tail(text, lines: 40)
+        text.to_s.split("\n").last(lines).join("\n")
+      end
+
+      def relative_to_repo(path)
+        path.to_s.delete_prefix(REPO_ROOT + File::SEPARATOR)
+      end
+
+      def log(message)
+        puts message
+      end
+
+      def log_heading(message)
+        puts ""
+        puts "=== #{message} " + "=" * [ 72 - message.length, 3 ].max
+      end
+  end
+end
+
+options = { keep: false, skip_fresh: false, fast: false }
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: bin/acceptance [options]"
+  opts.on("--keep", "Keep the generated application after a successful run") { options[:keep] = true }
+  opts.on("--skip-fresh", "Reuse the last generated application instead of running rails new") { options[:skip_fresh] = true }
+  opts.on("--fast", "Skip RuboCop and Brakeman checks") { options[:fast] = true }
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit 0
+  end
+end
+
+begin
+  parser.parse!(ARGV)
+rescue OptionParser::ParseError => e
+  warn e.message
+  warn parser
+  exit 1
+end
+
+runner = T40Acceptance::Runner.new(options)
+at_exit { runner.stop_server }
+exit runner.run

@@ -1,0 +1,10 @@
+schema_version: 1
+name: scim
+status: interface_only
+summary: >-
+  SCIM 2.0 user provisioning: automated joiner, mover and leaver changes driven
+  by the customer's identity provider. Separately scoped from SSO.
+requires_approved_scope: true
+conformance:
+  contract: MODULE.md
+  required_checks: []
