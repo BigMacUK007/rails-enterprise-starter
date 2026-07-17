@@ -1,0 +1,10 @@
+schema_version: 1
+name: saml
+status: interface_only
+summary: >-
+  SAML 2.0 single sign-on for older enterprise identity providers. Requires
+  customer-specific conformance work and operating support; prefer oidc.
+requires_approved_scope: true
+conformance:
+  contract: MODULE.md
+  required_checks: []

@@ -1,0 +1,25 @@
+# Default core manifest — used by bin/acceptance and as the non-interactive
+# baseline for a standard multi-account passwordless install.
+manifest_version: 1
+project:
+  name: "T40 Acceptance App"
+  identifier: "t40-acceptance-app"
+tenancy:
+  mode: multi_account
+authentication:
+  mode: passwordless
+modules:
+  oidc: false
+  saml: false
+  scim: false
+  rls: false
+  api: false
+  webhooks: false
+  ai: false
+data_risk:
+  personal_data: true
+  special_category_data: false
+  children_data: false
+  financial_data: false
+deployment:
+  profile: standard

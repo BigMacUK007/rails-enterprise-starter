@@ -1,0 +1,4 @@
+# Critical and high security findings block release. A temporary exception is
+# valid only when it names the exact finding, an accountable owner, a reason
+# and a future expiry date. Empty is the secure default.
+exceptions: []

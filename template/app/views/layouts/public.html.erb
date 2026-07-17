@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><%= content_for(:title) || "Sign in" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <style>
+      .public-body { min-height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center; }
+      .public-main { width: 100%; max-width: 26rem; padding: 1rem; }
+      .public-main .alert { margin-bottom: 1rem; }
+    </style>
+  </head>
+  <body class="public-body">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <main id="main-content" class="public-main" tabindex="-1">
+      <% if flash[:alert] %>
+        <div class="alert alert--negative" role="alert"><%= flash[:alert] %></div>
+      <% end %>
+      <% if flash[:notice] %>
+        <div class="alert alert--positive" role="status"><%= flash[:notice] %></div>
+      <% end %>
+
+      <%= yield %>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,59 @@
+# Documented example manifest showing every field, including module
+# selections and higher data-risk answers.
+#
+# IMPORTANT: every optional module ships as interface-only in starter
+# release 2.0.0. Selecting one (as this example does with `api` and
+# `webhooks`) makes preflight fail closed with a hard error: each module
+# requires an approved, funded client requirement before it is implemented.
+# See modules/<name>/MODULE.md for the interface and selection rules.
+# Copy this file and set every module to false for an installable manifest,
+# or start from manifests/core.yml.
+
+# Schema version. Must be the integer 1. Unknown top-level keys, unknown
+# module names and bad enum values are validation errors (fail closed).
+manifest_version: 1
+
+project:
+  # Human-readable product name (required, non-empty).
+  name: "Example Client Portal"
+  # Machine identifier (required): lowercase letters, digits and hyphens,
+  # starting with a letter or digit (/\A[a-z0-9][a-z0-9-]*\z/).
+  identifier: "example-client-portal"
+
+tenancy:
+  # multi_account — Account is the tenant root; users can belong to several
+  #                 accounts (default).
+  # single_account — one account per deployment; the same isolation
+  #                  machinery is installed but the UI assumes one tenant.
+  mode: multi_account
+
+authentication:
+  # passwordless is the only valid core value in v2 (magic-link sign-in).
+  # Enterprise SSO arrives via the oidc module when funded.
+  mode: passwordless
+
+modules:
+  # All optional and default false. Every module below is interface-only in
+  # v2.0.0 — selecting `true` fails preflight until the module is funded and
+  # implemented.
+  oidc: false      # enterprise SSO keyed by issuer + subject
+  saml: false      # customer-specific SAML conformance
+  scim: false      # directory-driven user provisioning
+  rls: false       # PostgreSQL row-level security defence in depth
+  api: true        # versioned public API with tenant-bound credentials
+  webhooks: true   # signed inbound/outbound webhooks with replay protection
+  ai: false        # gated AI gateway with policy authorisation
+
+data_risk:
+  # All four answers are required booleans. Interactive mode asks them;
+  # a missing answer is a validation error. They drive the privacy
+  # follow-up items in the install report and the DPIA screening gate.
+  personal_data: true
+  special_category_data: true
+  children_data: false
+  financial_data: true
+
+deployment:
+  # standard        — default hardening profile
+  # high_assurance  — for contracts that demand stricter operational gates
+  profile: high_assurance

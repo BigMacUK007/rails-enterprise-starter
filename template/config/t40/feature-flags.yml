@@ -1,0 +1,26 @@
+# T40 feature flags — temporary release controls, validated at boot by
+# config/initializers/t40_flags.rb (via T40::Flags.validate!).
+#
+# Rules:
+#   - Flags are for gradual rollout, kill switches and experiments — they are
+#     temporary. Durable, purchased customer capabilities belong in Account
+#     entitlements instead.
+#   - A flag that is missing from this file always reads as DISABLED
+#     (T40::Flags.enabled? returns false) — the safe default.
+#   - Every flag MUST declare all four fields below or the application will
+#     refuse to boot:
+#       description:  what the flag controls and why it exists
+#       owner:        the accountable person or team
+#       removal_by:   ISO 8601 date by which the flag must be deleted
+#       default:      boolean safe default
+#   - Run `bin/rails t40:flags:report` to list flags and find expired ones.
+#
+# Example:
+#
+# flags:
+#   new_billing_screen:
+#     description: "Gradual rollout of the rebuilt billing screen"
+#     owner: "ben@t40digital.co.uk"
+#     removal_by: "2026-09-30"
+#     default: false
+flags: {}

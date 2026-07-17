@@ -1,0 +1,10 @@
+schema_version: 1
+name: rls
+status: interface_only
+summary: >-
+  PostgreSQL row-level security as tenant defence in depth for higher-risk
+  shared-database deployments. Never a replacement for application authorisation.
+requires_approved_scope: true
+conformance:
+  contract: MODULE.md
+  required_checks: []

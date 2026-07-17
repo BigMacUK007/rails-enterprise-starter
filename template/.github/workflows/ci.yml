@@ -1,0 +1,147 @@
+# CI for the generated application.
+#
+# Security notes — untrusted pull requests:
+# - This workflow runs on `pull_request` and `push` events only. Runs triggered
+#   by pull requests from forks receive a read-only GITHUB_TOKEN and NO repository
+#   secrets, which keeps untrusted contributions away from trusted runners and
+#   credentials.
+# - Never add a `pull_request_target` trigger combined with a checkout of the PR
+#   head ref: that combination executes untrusted code with access to secrets and
+#   a privileged token.
+# - No job below requires repository secrets.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@003a5c4d8d6321bd302e38f6f0ec593f77f06600 # pinned 2026-07-17
+        with:
+          bundler-cache: true
+
+      - name: Lint Ruby (RuboCop omakase)
+        run: bundle exec rubocop --no-color
+
+  security_static:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@003a5c4d8d6321bd302e38f6f0ec593f77f06600 # pinned 2026-07-17
+        with:
+          bundler-cache: true
+
+      - name: Static security analysis (Brakeman)
+        run: bundle exec brakeman -q --no-pager --exit-on-warn
+
+      - name: Dependency vulnerability check (bundler-audit)
+        run: bundle exec bundler-audit check --update
+
+      # Secret scanning runs from a version-pinned container image so the
+      # scanner cannot change underneath the pipeline. `--no-git` scans the
+      # checked-out tree as plain files (the shallow CI checkout has no useful
+      # history to walk).
+      - name: Secret scan (gitleaks, pinned)
+        run: >-
+          docker run --rm -v "${{ github.workspace }}:/repo" -w /repo
+          zricethezav/gitleaks:v8.18.4@sha256:75bdb2b2f4db213cde0b8295f13a88d6b333091bbfbf3012a4e083d00d31caba
+          detect --source . --no-git -v
+
+  # Proves that every migration applies against an empty database. This catches
+  # migrations that only pass on databases that already contain earlier state,
+  # and keeps the from-zero install path honest.
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev postgresql-client
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@003a5c4d8d6321bd302e38f6f0ec593f77f06600 # pinned 2026-07-17
+        with:
+          bundler-cache: true
+
+      - name: Migrate from zero
+        run: bin/rails db:create db:migrate
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libpq-dev postgresql-client
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@003a5c4d8d6321bd302e38f6f0ec593f77f06600 # pinned 2026-07-17
+        with:
+          bundler-cache: true
+
+      - name: Prepare test database
+        run: bin/rails db:test:prepare
+
+      - name: Run RSpec
+        run: bundle exec rspec --format progress --format documentation --out tmp/rspec_results.txt
+
+      - name: Generate resolved release evidence
+        env:
+          T40_RELEASE_ID: ci-${{ github.sha }}
+          T40_RELEASE_APPROVALS: pull-request-review,protected-release-environment
+        run: bin/rails t40:release_evidence
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-and-release-evidence
+          path: |
+            tmp/rspec_results.txt
+            tmp/release-evidence/*.json
+          if-no-files-found: ignore
