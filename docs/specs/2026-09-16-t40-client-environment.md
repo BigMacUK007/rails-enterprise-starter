@@ -122,7 +122,7 @@ contents untracked in git with no remote. One `git clean -fd` erases it.
 | 6 | T40 access | A seeded T40 super-admin account per environment, plus Tailscale for local boxes. Move to the starter's time-boxed `SupportAccessGrant` before signing a client who would object to standing access. |
 | 7 | User management | Built into the client-environment manifest. |
 | 8 | Tools | Plain namespaced Rails under `app/tools/<name>/`, plus a registry table. No engines. |
-| 9 | Design | Vendor `tokens.css` from the design system. Build about 15 Phlex components, plus 8 dashboard widgets. |
+| 9 | Design | Keep a copy of `tokens.css` in this repository as a template file, next to the components that read it. Build about 15 Phlex components, plus 8 dashboard widgets. |
 | 10 | Branding | `config/t40/branding.yml` per client — colour and logo. Rails renders a style block overriding the tokens. No rebuild needed to change it. |
 | 11 | Rails vs React | They share tokens and nothing else. Drift below the token layer is accepted. |
 | 12 | AI | Build out the starter's `ai` module properly. Off by default, on per client. |
@@ -167,10 +167,34 @@ code — copy the screens.
 ### 5.2 Design layer
 
 - Delete `design-tokens.css` from the starter.
-- Un-ignore `packages/tokens/dist/` in the design system so the built CSS is
-  committed and there is a stable file to copy from.
-- The installer vendors `tokens.css` into `app/assets/stylesheets/` and links
-  it from the layout.
+- **Keep a copy of `tokens.css` in this repository**, as a template file
+  alongside the Phlex components that consume it. The installer copies it into
+  the new app's `app/assets/stylesheets/` and links it from the layout, exactly
+  as it copies every other template file.
+
+  No build step, no Node, no network and no second repository at install time.
+
+  This is deliberate, not a shortcut. The Phlex components are coupled to
+  specific token names, so the tokens and the components that read them should
+  version together. Splitting them across repositories means a token rename in
+  one repository silently breaks the other. It is also consistent with decision
+  11, which already accepts drift between the React and Rails sides below the
+  token layer.
+
+  The starter's SHA-256 file ledger handles propagation. When the template copy
+  changes, a re-run of the installer reports, per client, whether their copy is
+  untouched and safe to upgrade or has been edited locally.
+
+  Three guardrails keep the copy honest:
+
+  1. A header comment in the copied file recording that it is generated, the
+     source repository, and the **source commit SHA**. Without it, someone
+     eventually edits it by hand believing it is the source.
+  2. A documented refresh procedure in the starter's README: run `npm run check`
+     in `t40-systems-design-system` first so the WCAG contrast gate still
+     applies, then copy, then commit.
+  3. Refresh deliberately, as its own commit, never as a side effect of other
+     work.
 - Build 15 Phlex components against those tokens, plus the 8 dashboard
   widgets in 5.10: button, input, card,
   table, badge, alert, sidebar shell, breadcrumb, dropdown menu, dialog, form
@@ -468,7 +492,7 @@ No Basecamp project is created. That stays manual.
 All of it before the first client environment is deployed. Within that,
 dependencies give a natural order:
 
-1. Remove `design-tokens.css`. Commit the design system's `dist/`.
+1. Remove `design-tokens.css`. Add `tokens.css` as a template file.
 2. Phlex component set against the vendored tokens.
 3. User management and settings, built on those components.
 4. Tool registry.
