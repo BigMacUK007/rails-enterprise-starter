@@ -44,10 +44,19 @@ It does have a working user management screen, a tool registry
 (`tools/index.js` plus a `register(ctx)` contract), and a tested tenant
 isolation suite.
 
-This repository and its two tools — `hpi-processor` and
-`pipedrive-reporting` — are in production. **They stay exactly as they are.**
-Add one line to the README pointing new client work at the Rails path, so
-nobody starts a new client from the wrong repo.
+**What the template actually contains.** It is an empty client shell. A
+previous change stripped out the real client tools, so `tools/` now holds only
+two throwaway demos, `demo-counter` and `demo-echo`, beside four demo client
+configs and `docs/demo-data.md`. The live tools — `hpi-processor` and
+`pipedrive-reporting` — are in the deployed client portals, not in this
+template.
+
+That matters for one reason only: do not plan to migrate those two tools from
+here, because they are not here. Both they and the portals running them stay
+exactly as they are.
+
+Add a note to the README pointing new client work at the Rails path, so
+nobody starts a new client from the wrong repository.
 
 ### 2.2 `rails-enterprise-starter` — the foundation
 
