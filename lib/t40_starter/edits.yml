@@ -64,6 +64,13 @@ edits:
       include Authorization
       include MaintenanceMode
       # <<< t40:starter controller <<<
+  - file: app/mailers/application_mailer.rb
+    section: mailer
+    anchor: "class ApplicationMailer < ActionMailer::Base"
+    block: |
+      # Sign-in codes must come from an address the mail provider will accept.
+      # rails new leaves a placeholder here; MAIL_FROM replaces it.
+      default from: -> { ENV.fetch("MAIL_FROM", "no-reply@localhost") }
   - file: app/jobs/application_job.rb
     section: jobs
     anchor: "class ApplicationJob < ActiveJob::Base"

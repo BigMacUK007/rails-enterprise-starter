@@ -1,0 +1,109 @@
+# T40 Client Environment — one deployment per client.
+#
+# Three services on one box: the Rails app, PostgreSQL, and a Solid Queue
+# worker. There is no separate reverse proxy. Thruster ships inside the
+# Rails image and terminates TLS itself, requesting certificates from
+# Let's Encrypt for whatever TLS_DOMAIN names.
+#
+# Works the same on a VPS and on a machine in a client's office. On a local
+# box, leave TLS_DOMAIN unset and reach the app over Tailscale instead.
+#
+#   cp .env.example .env     # then fill it in
+#   docker compose up -d
+#   docker compose exec app bin/rails t40:bootstrap
+#
+# The image is built from the Dockerfile that rails new generates. It is
+# already production-shaped: multi-stage, jemalloc, non-root, Thruster.
+
+name: ${APP_NAME:?set APP_NAME in .env}
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RAILS_ENV: production
+      # Thruster: naming a domain switches on automatic TLS. Leave it unset
+      # for a local box with no public name.
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?}
+      # Rails 8 splits cache, queue and cable into their own databases. They
+      # live on the same PostgreSQL server as the primary.
+      DATABASE_URL: ${DATABASE_URL:?}
+      CACHE_DATABASE_URL: ${CACHE_DATABASE_URL:?}
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:?}
+      CABLE_DATABASE_URL: ${CABLE_DATABASE_URL:?}
+      # Magic link sign-in is the only way in. If mail stops, everyone is
+      # locked out, including T40.
+      MAIL_FROM: ${MAIL_FROM:?}
+      SMTP_ADDRESS: ${SMTP_ADDRESS:?}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:?}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?}
+      APP_HOST: ${APP_HOST:?}
+      RELEASE_SHA: ${RELEASE_SHA:-}
+      T40_CSP_ENFORCE: ${T40_CSP_ENFORCE:-1}
+    volumes:
+      # Active Storage uploads and Thruster's TLS certificates both live here.
+      # Without this volume Let's Encrypt is re-issued on every restart, and
+      # their rate limit will lock you out.
+      - app_storage:/rails/storage
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["bin/jobs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?}
+      DATABASE_URL: ${DATABASE_URL:?}
+      CACHE_DATABASE_URL: ${CACHE_DATABASE_URL:?}
+      QUEUE_DATABASE_URL: ${QUEUE_DATABASE_URL:?}
+      CABLE_DATABASE_URL: ${CABLE_DATABASE_URL:?}
+      MAIL_FROM: ${MAIL_FROM:?}
+      SMTP_ADDRESS: ${SMTP_ADDRESS:?}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:?}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?}
+      APP_HOST: ${APP_HOST:?}
+    volumes:
+      - app_storage:/rails/storage
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-t40}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-t40_production}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # Creates the cache, queue and cable databases on first boot.
+      - ./config/docker/create-databases.sh:/docker-entrypoint-initdb.d/create-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-t40} -d ${POSTGRES_DB:-t40_production}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not published. Reach it with: docker compose exec db psql -U t40
+    expose:
+      - "5432"
+
+volumes:
+  app_storage:
+  db_data:
