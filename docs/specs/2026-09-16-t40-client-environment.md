@@ -93,8 +93,11 @@ What it is missing:
   client app today needs the Rails console or a rake task.
 - **No deployment configuration.** No Dockerfile, no Compose file, no Kamal.
 - `design-tokens.css` — 2,487 lines copied wholesale from a different project
-  ("SSP Compliance Tracker"), still carrying that app's page CSS. Nothing
-  links it, so the Phlex components render unstyled.
+  ("SSP Compliance Tracker"), still carrying that app's page CSS for units,
+  certificates and an import screen. It **is** loaded: `stylesheet_link_tag
+  :app` includes every file under `app/assets/**/*.css`. It covers roughly half
+  the classes the Phlex components use, so the interface is part-styled by
+  another product's CSS rather than unstyled. Replaced in section 5.2.
 
 ### 2.3 `t40-systems-design-system` — tokens only
 
@@ -178,8 +181,12 @@ code — copy the screens.
 - Delete `design-tokens.css` from the starter.
 - **Keep a copy of `tokens.css` in this repository**, as a template file
   alongside the Phlex components that consume it. The installer copies it into
-  the new app's `app/assets/stylesheets/` and links it from the layout, exactly
-  as it copies every other template file.
+  the new app's `app/assets/stylesheets/`, exactly as it copies every other
+  template file.
+
+  No layout change is needed. `stylesheet_link_tag :app` already includes every
+  file under `app/assets/**/*.css`, so both the starter's own layout and the
+  one `rails new` generates pick it up.
 
   No build step, no Node, no network and no second repository at install time.
 
@@ -204,6 +211,9 @@ code — copy the screens.
      applies, then copy, then commit.
   3. Refresh deliberately, as its own commit, never as a side effect of other
      work.
+- `components.css` ships beside it, covering exactly the classes the existing
+  `T40::Ui` components use, written only from those tokens. It is the floor,
+  not the component library.
 - Build 15 Phlex components against those tokens, plus the 8 dashboard
   widgets in 5.10: button, input, card,
   table, badge, alert, sidebar shell, breadcrumb, dropdown menu, dialog, form
