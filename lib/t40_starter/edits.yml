@@ -37,6 +37,13 @@ edits:
     block: |
       # >>> t40:starter gems >>>
       gem "csv"
+      # Pinned to 2.x: json 3.0 made JSON.parse take keyword options only, but
+      # ActiveSupport::JSON.decode still calls JSON.parse(json, options) with a
+      # positional hash. That breaks the schema dumper on any table with a JSON
+      # or JSONB column default, such as accounts.entitlements — the table is
+      # silently skipped in db/schema.rb and db:test:prepare then fails.
+      # Remove once Rails ships a fix (it is not in 8.1.3.1).
+      gem "json", "~> 2.21"
       gem "phlex-rails", "~> 2.4"
       gem "solid_queue"
       group :development, :test do
