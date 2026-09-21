@@ -90,6 +90,7 @@ module T40Acceptance
       step("apply") { run_apply }
       step("idempotent_reapply") { assert_idempotent_reapply }
       step("db_prepare") { prepare_databases }
+      step("schema_round_trip") { assert_schema_round_trips }
       step("atomic_magic_link") { prove_atomic_magic_link_consumption }
       step("boot_and_health") { boot_and_check_health }
       step("browser_authentication") { run_contract_specs("spec/system/passwordless_sign_in_spec.rb") }
@@ -229,6 +230,50 @@ module T40Acceptance
         run!("bin/rails", "db:drop", chdir: APP_DIR, allow_failure: true)
         run!("bin/rails", "db:prepare", chdir: APP_DIR)
       end
+
+      # Two failures in this area are silent, and both surface later as a
+      # confusing "migrations are pending" abort from the first system spec.
+      #
+      #   1. The schema dumper rescues per-table errors and writes a comment
+      #      in place of the table, so db/schema.rb loses a create_table while
+      #      keeping the foreign keys that point at it.
+      #   2. ActiveRecord::Migration.maintain_test_schema! loads the schema by
+      #      shelling out with system("bin/rails db:test:prepare") and never
+      #      checks the return value, so a failed load looks like success.
+      #
+      # Check both here, where the cause is still obvious.
+      def assert_schema_round_trips
+        schema_path = File.join(APP_DIR, "db", "schema.rb")
+        unless File.exist?(schema_path)
+          raise StepFailure, "db/schema.rb was not written by db:prepare"
+        end
+
+        undumped = File.readlines(schema_path).grep(/Could not dump/)
+        unless undumped.empty?
+          raise StepFailure,
+            "the schema dumper skipped one or more tables, so db/schema.rb is incomplete:\n" \
+            "#{undumped.map { |line| "  #{line.strip}" }.join("\n")}\n" \
+            "This usually means a gem upgrade broke a column type. Check the dump with:\n" \
+            "  bin/rails runner 'ActiveRecord::SchemaDumper.dump(ActiveRecord::Base.connection_pool, $stdout)'"
+        end
+
+        # Prove the test database really loaded, rather than trusting exit codes.
+        migrations = Dir.children(File.join(APP_DIR, "db", "migrate")).count { |f| f.end_with?(".rb") }
+        run!("bin/rails", "db:test:prepare", chdir: APP_DIR)
+        applied, = run!("bin/rails", "runner", TEST_SCHEMA_PROBE, chdir: APP_DIR, env: { "RAILS_ENV" => "test" })
+        applied = applied[/APPLIED_MIGRATIONS=(\d+)/, 1].to_i
+
+        return if applied == migrations
+
+        raise StepFailure,
+          "the test database has #{applied} applied migrations but db/migrate holds #{migrations}. " \
+          "db:test:prepare did not load the schema."
+      end
+
+      TEST_SCHEMA_PROBE = <<~'RUBY'
+        count = ActiveRecord::Base.lease_connection.select_value("select count(*) from schema_migrations")
+        puts "APPLIED_MIGRATIONS=#{count}"
+      RUBY
 
       def prove_atomic_magic_link_consumption
         check = <<~'RUBY'
