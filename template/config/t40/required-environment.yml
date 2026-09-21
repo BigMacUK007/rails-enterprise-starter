@@ -17,6 +17,12 @@ production:
     - name: DATABASE_URL
       source: secret_manager
       notes: "PostgreSQL connection string for the primary database."
+    - name: MAIL_FROM
+      source: environment
+      notes: "Sender address for sign-in codes. Must be verified with the mail provider."
+    - name: APP_HOST
+      source: environment
+      notes: "Public URL of this environment, including scheme. Magic link URLs are built from it."
     - name: SMTP_ADDRESS
       source: environment
       notes: "SMTP host for outbound mail. Passwordless sign-in depends on mail delivery."
